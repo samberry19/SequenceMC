@@ -66,7 +66,7 @@ def one_hot_decode(one_hot_sequence, L, alphabet = default_aa_alphabet, remove_g
     '''
 
     alph_size = len(alphabet)
-    L = len(one_hot_sequence) / alph_size
+    L = int(len(one_hot_sequence) / alph_size)
 
     if remove_gaps == True and gap_char in alphabet:
 
@@ -125,6 +125,7 @@ def potts_model_hamiltonian(seq, hi, Jij, independent=False):
                 E += Jij[(i, j, x, y)]
 
     return E
+
 
 def to_numeric(seq, aa_alphabet=default_aa_alphabet):
 
@@ -272,7 +273,7 @@ class DCASampler:
 
     def metropolis(self, N, nch, suppress_log=False):
 
-    ''' Run Metropolis sampling of sequences from the DCA model, plus any added potentials.
+        ''' Run Metropolis sampling of sequences from the DCA model, plus any added potentials.
 
         Parameters
         ----------
@@ -310,7 +311,7 @@ class DCASampler:
 
     def run(self, N, method=None, n_jobs = os.cpu_count(), parallel_method="threads", progress=True, suppress_log=False):
 
-    ''' Run Markov Chain Monte Carlo on all chains.
+        ''' Run Markov Chain Monte Carlo on all chains.
 
         Parameters
         ----------
@@ -331,13 +332,25 @@ class DCASampler:
 
         if method.lower() == 'metropolis':
 
-            # Run separate chains as parallel threads
-            Parallel(n_jobs=n_jobs, prefer=parallel_method)(delayed(self.metropolis)(N, i, progress=progress, suppress_log=suppress_log) for i in range(self.N_chains))
+            if parallel_method.lower() == 'none':
+                for i in range(self.N_chains):
+                    print("Sampling chain", i)
+                    self.metropolis(N, i)
+
+            else:
+
+                # Run separate chains as parallel threads
+                Parallel(n_jobs=n_jobs, prefer=parallel_method)(delayed(self.metropolis)(N, i, suppress_log=suppress_log) for i in range(self.N_chains))
 
         elif method.lower() == 'gibbs':
 
             if self.gibbs_implemented:
-                Parallel(n_jobs=n_jobs, prefer=parallel_method)(delayed(self.gibbs)(N, i) for i in range(self.N_chains))
+                if parallel_method.lower() == 'none':
+                    for i in range(self.N_chains):
+                        print("Sampling chain", i)
+                        self.gibbs(N, i)
+                else:
+                    Parallel(n_jobs=n_jobs, prefer=parallel_method)(delayed(self.gibbs)(N, i) for i in range(self.N_chains))
             else:
                 return NotImplementedError("Must define a Gibbs sampling method first!")
 
@@ -475,8 +488,6 @@ def RLVP(seq, pca_model, ref_seq, ref_embedding, seq_weight, pca_weight):
     seq_num = np.argmax(seq.reshape(N,21), axis=1)  # Convert to numeric from 1-hot for ease
     seq_distance = np.sum(seq_num != ref_seq, axis=0)
 
-    print(seq_num)
-
     # Transform into the PCA latent space
     pca_embedding = pca_model.transform(seq.reshape(1,-1))[0]
 
@@ -501,13 +512,13 @@ def SequencePCA(alignment, n=2):
     sequence_pca = PCA(n_components=n)
     alignment_latent_pca = sequence_pca.fit_transform(encoded_natural_sequences)
 
-    return sequence_pca, alignment_latent_pca, encoder
+    return sequence_pca, alignment_latent_pca, encoder, encoded_natural_sequences
 
 def LatentVoyager(model, w1, w2, N_iterations, alignment, n_components=2,
                   refseq=None, nref=0, n_chains=3, T=1, record_freq=1000,
                  burnin=0.25):
 
-    pca_model, aln_embedding, _ = SequencePCA(alignment, n_components)
+    pca_model, aln_embedding, _, _ = SequencePCA(alignment, n_components)
     refseq = alignment.as_numeric()[nref]
     ref_embedding = aln_embedding[nref]
 
@@ -539,9 +550,12 @@ class GibbsRLVPSampler(DCASampler):
                  pos_constraint=None, pca_precalculated=None):
 
         if type(pca_precalculated)==type(None):
-            self.pca_model, aln_embedding, self.encoder = SequencePCA(alignment, n_components)
+            self.pca_model, aln_embedding, self.encoder, self._enc_ali = SequencePCA(alignment, n_components)
         else:
-            self.pca_model, aln_embedding, self.encoder = pca_precalculated
+            self.pca_model, aln_embedding, self.encoder, self._enc_ali = pca_precalculated
+
+        # Save the PCA encoding means for transforming into PCA coordinates
+        self._enc_means = np.mean(self._enc_ali, axis=0)
 
         self.input_alignment = alignment
         self.w1 = w1
@@ -582,15 +596,19 @@ class GibbsRLVPSampler(DCASampler):
                     # change in distance to reference sequence
                     conditional_energies = conditional_energies + 1 - self.w1 * np.identity(21)[self.refseq[k]][1:]
 
-                    # change in pca potential
-                    # first get the component terms for the position of interest, ignoring the gap term
-                    components = self.pca_model.components_.reshape((self.n_components, self.L, 21))[:,k,1:].T
+                    if self.w2 != 0:
+                        # change in pca potential
+                        # first get the component terms for the position of interest, ignoring the gap term
+                        components =s self.pca_model.components_.reshape((self.n_components, self.L, 21))[:,k,1:].T
 
-                    # calculate how far each one is from the identity of the reference
-                    component_diffs = np.sqrt(np.sum((components - components[self.refseq[k]-1])**2, axis=1))
+                        # need to subtract off the mean to get the correct PCA difference
+                        components = components - self._embed_means[:,k,1:].T
 
-                    # add this term weighted by w2 into the overall weight
-                    conditional_energies = conditional_energies - self.w2 * component_diffs
+                        # calculate how far each one is from the identity of the reference
+                        component_diffs = np.sqrt(np.sum((components - components[self.refseq[k]-1])**2, axis=1))
+
+                        # add this term weighted by w2 into the overall weight
+                        conditional_energies = conditional_energies - self.w2 * component_diffs
 
                     # All that matters is the difference between energies, magnitudes will be normalized out
                     #  subtract off the lowest to make numbers reasonable and prevent overflow
@@ -605,6 +623,61 @@ class GibbsRLVPSampler(DCASampler):
                     self.log[nch].append(s)
                     self.energies[nch].append(current_energy)
 
+    def pseudolikelihood(self, s):
+
+        lik = 0
+
+        for k in range(self.L):
+
+            # change in dca component
+            h = -calc_dca_conditionals(s-1, self.model.h_i, self.model.J_ij, k)
+
+            # change in distance to reference sequence
+            h = h + 1 - self.w1 * np.identity(21)[self.refseq[k]][1:]
+
+            # change in pca potential
+            # first get the component terms for the position of interest, ignoring the gap term
+            components = self.pca_model.components_.reshape((self.n_components, self.L, 21))[:,k,1:].T
+
+            # calculate how far each one is from the identity of the reference
+            component_diffs = np.sqrt(np.sum((components - components[self.refseq[k]-1])**2, axis=1))
+
+            # add this term weighted by w2 into the overall weight
+            h = h - self.w2 * component_diffs
+
+            # All that matters is the difference between energies, magnitudes will be normalized out
+            #  subtract off the lowest to make numbers reasonable and prevent overflow
+            h -= np.min(h)
+
+            conditional_probs = np.exp(-h / self.T)
+
+            #print(conditional_probs)
+
+            p = conditional_probs[s[k]-1] / np.sum(conditional_probs)
+
+            lik += np.log(p)
+
+        return lik
+
+    def RLVP(self, sequence):
+
+        if sequence.shape == (self.L,):
+            if isinstance(sequence[0], (int, np.int64)):
+                sequence = self.encoder.transform([self.alphabet[sequence]])
+            else:
+                sequence = self.encoder.transform([sequence])
+
+        return RLVP(sequence, self.pca_model, self.refseq, self._ref_embedding, self.w1, self.w2)
+
+    def calc_pseudolikelihoods(self):
+
+        L = []
+
+        for seq in tqdm(np.concatenate(self.log)):
+            L.append(self.pseudolikelihood(seq))
+
+        return L
+
 @jit(nopython=True)
 def calc_dca_conditionals(seq, hi, jij, k):
 
@@ -618,7 +691,7 @@ def calc_dca_conditionals(seq, hi, jij, k):
         u = hi[k, aa]
 
         for i in range(len(hi)):
-            u += jij[k, aa, i, seq[i]]
+            u += jij[k, i, aa, seq[i]]
 
         U.append(u)
 
