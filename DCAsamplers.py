@@ -1,5 +1,5 @@
 '''
-samplers.py
+DCAsamplers.py
 
 This script contains a set of functions and class for sampling sequences from a DCA model with optional
 added potentials to bias the sequences. The core functionality is embedded in the OneHotDCASampler class.
@@ -38,6 +38,9 @@ from joblib import Parallel, delayed
 import os
 
 from numba import jit
+
+default_aa_alphabet = np.array(['-', 'A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P',
+       'Q', 'R', 'S', 'T', 'V', 'W', 'Y'])
 
 default_aa_alphabet = np.array(['-', 'A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P',
        'Q', 'R', 'S', 'T', 'V', 'W', 'Y'])
@@ -105,7 +108,7 @@ def DCAEnergy(s, model, independent=False, one_hot=False):
         return potts_model_hamiltonian(seq, model.h_i, model.J_ij, independent=independent)
 
     else:
-        return potts_model_hamiltonian(s, model.h_i, model.J_ij, independent=independent)
+        return potts_model_hamiltonian(s-1, model.h_i, model.J_ij, independent=independent)
 
 
 @jit(nopython=True)
@@ -131,7 +134,7 @@ def to_numeric(seq, aa_alphabet=default_aa_alphabet):
 
     ''' Converts a sequence from strings to numbers '''
 
-    return np.array([list(alphabet).index(k) for k in seq])
+    return np.array([list(default_aa_alphabet).index(k) for k in seq])
 
 
 def RLVP(seq, pca_model, ref_seq, ref_embedding, seq_weight, pca_weight):
@@ -173,7 +176,7 @@ def all_single_mutants(s, m=None):
                 else:
                     names.append(s[i]+str(m.index_list[i])+j)
 
-    return MultipleSequenceAlignment(np.array(all_singles), ids=names)
+    return msa.MultipleSequenceAlignment(np.array(all_singles), ids=names)
 
 class DCASampler:
 
@@ -231,6 +234,7 @@ class DCASampler:
         self.alphabet = default_aa_alphabet
         self.shape = (self.L, len(self.alphabet))
         self.pos_constraint = pos_constraint
+        self.bias = []
 
         # without extra definitions, we can only do metropolis sampling
         self.default_method = 'metropolis'
@@ -384,27 +388,27 @@ class DCASampler:
             else:
                 log_numeric = log
 
-            msa = MultipleSequenceAlignment(np.array(self.alphabet[log_numeric])[indexer],
+            ali = msa.MultipleSequenceAlignment(np.array(self.alphabet[log_numeric])[indexer],
                                             ids=np.array([str(i) for i in np.arange(len(indexer))]))
 
             # Calculate frequencies
-            msa.calc_frequencies()
+            ali.calc_frequencies()
 
             # Assign burnin and stride as attributes of the MSA
-            msa.burnin = burnin; msa.stride = stride
+            ali.burnin = burnin; ali.stride = stride
 
-            self.msas.append(msa)
-            self.frequency_list.append(msa.frequencies)
+            self.msas.append(ali)
+            self.frequency_list.append(ali.frequencies)
 
         self.frequencies = np.mean(self.frequency_list)
 
         r = []
-        for msa in self.msas:
-            for record in msa._records:
+        for msa_ in self.msas:
+            for record in msa_._records:
                 r.append(record)
 
         # Re-initiate an MSA from that
-        self.alignment = MultipleSequenceAlignment(r)
+        self.alignment = msa.MultipleSequenceAlignment(r)
 
     def chain_divergences(self, relative_burnin=0.25, stride=1):
 
@@ -429,8 +433,16 @@ class DCASampler:
         TempSamplerDict["msas"] = self.msas
         TempSamplerDict["U"] = self.energies
         TempSamplerDict["index_list"] = self.model.index_list
-        TempSamplerDict["encoder"] = self.encoder
-        TempSamplerDict["refseq"] = self.model.seq()
+        try:
+            TempSamplerDict["encoder"] = self.encoder
+        except:
+            None
+
+        try:
+            TempSamplerDict["refseq"] = self.model.seq()
+        except:
+            None
+
         TempSamplerDict["T"] = self.T
         TempSamplerDict["N_iterations"] = self.N_iterations
         TempSamplerDict["N_chains"] = self.N_chains
@@ -438,7 +450,7 @@ class DCASampler:
         pickle.dump(TempSamplerDict, open(filename, "wb"))
 
 
-def mutate(s, alphabet_size=21, nmax=20, one_hot=True, pos_constraint=None):
+def mutate(s, alphabet_size=21, nmax=20, one_hot=False, pos_constraint=None):
 
     """Randomly mutate the sequence of interest.
         Sequence must be numerically coded, either 1-20 (one_hot=False)
@@ -471,7 +483,7 @@ def mutate(s, alphabet_size=21, nmax=20, one_hot=True, pos_constraint=None):
 
     # Otherwise swapping out the position is very simple
     else:
-        snew[pos] = np.random.choice(np.arange(0, 20))
+        s_new[pos] = np.random.choice(np.arange(1, 21))
 
     return s_new.astype('int')
 
@@ -541,36 +553,21 @@ def LatentVoyager(model, w1, w2, N_iterations, alignment, n_components=2,
 
     return rlvp_sampler, U_df
 
-class GibbsRLVPSampler(DCASampler):
+
+class GibbsDCASampler(DCASampler):
 
     '''A Gibbs sampler for the "Restrained latent voyager potential." Subclasses from the OneHotDCASampler
             but has a different run_mcmc.'''
 
-    def __init__(self, model, N_chains, alignment, w1, w2, T=1, nref=0, n_components=2, record_freq=10, independent=False,
-                 pos_constraint=None, pca_precalculated=None):
-
-        if type(pca_precalculated)==type(None):
-            self.pca_model, aln_embedding, self.encoder, self._enc_ali = SequencePCA(alignment, n_components)
-        else:
-            self.pca_model, aln_embedding, self.encoder, self._enc_ali = pca_precalculated
-
-        # Save the PCA encoding means for transforming into PCA coordinates
-        self._enc_means = np.mean(self._enc_ali, axis=0)
-
-        self.input_alignment = alignment
-        self.w1 = w1
-        self.w2 = w2
-        self.n_components = n_components
-
-        #refseq = alignment.as_numeric()[nref]
-        self._ref_embedding = aln_embedding[nref]
+    def __init__(self, model, N_chains, T=1, record_freq=10, independent=False, pos_constraint=None):
 
         super().__init__(model, N_chains, T=T, record_freq=record_freq, independent=independent,
-                         #extra_potential=lambda seq: RLVP(seq, pca_model, refseq, self._ref_embedding, w1, w2)[0],
                          pos_constraint=pos_constraint, one_hot=False)
 
         self.default_method = 'gibbs'
         self.gibbs_implemented=True
+
+        self._stored_state = []
 
     def gibbs(self, N, nch, progress=True, suppress_log=False):
 
@@ -593,22 +590,11 @@ class GibbsRLVPSampler(DCASampler):
                     # change in dca component
                     conditional_energies = -calc_dca_conditionals(s-1, self.model.h_i, self.model.J_ij, k)
 
-                    # change in distance to reference sequence
-                    conditional_energies = conditional_energies + 1 - self.w1 * np.identity(21)[self.refseq[k]][1:]
+                    if len(self.bias) > 0:
 
-                    if self.w2 != 0:
-                        # change in pca potential
-                        # first get the component terms for the position of interest, ignoring the gap term
-                        components =s self.pca_model.components_.reshape((self.n_components, self.L, 21))[:,k,1:].T
+                        for bias_fn in self.bias:
 
-                        # need to subtract off the mean to get the correct PCA difference
-                        components = components - self._embed_means[:,k,1:].T
-
-                        # calculate how far each one is from the identity of the reference
-                        component_diffs = np.sqrt(np.sum((components - components[self.refseq[k]-1])**2, axis=1))
-
-                        # add this term weighted by w2 into the overall weight
-                        conditional_energies = conditional_energies - self.w2 * component_diffs
+                            conditional_energies += bias_fn.dU(s, k)
 
                     # All that matters is the difference between energies, magnitudes will be normalized out
                     #  subtract off the lowest to make numbers reasonable and prevent overflow
@@ -623,60 +609,154 @@ class GibbsRLVPSampler(DCASampler):
                     self.log[nch].append(s)
                     self.energies[nch].append(current_energy)
 
-    def pseudolikelihood(self, s):
 
-        lik = 0
+class LinearDistanceRestraint:
+
+    """
+    A linear distance restraint for sampling sequences. Adds a constant potential term
+    """
+
+    def __init__(self, refseq, w):
+
+        self.w = w
+        self.L = len(refseq)
+        self._requires_stored_state = False
+
+        if isinstance(refseq[0], (str, np.str_)):
+            self.refseq = refseq
+            self.refseq_num = to_numeric(refseq)
+        else:
+            self.refseq_num = refseq
+            self.refseq = default_aa_alphabet[refseq]
+
+    def dist(self, seq):
+
+        if isinstance(seq[0], (str, np.str_)):
+            return np.sum(seq != self.refseq)
+
+        else:
+            return np.sum(seq != self.refseq_num)
+
+    def energy(self, seq):
+
+        return self.w * self.dist(seq)
+
+    def dU(self, seq, k, gap=False):
+
+        dU = 1 - np.identity(21)[self.refseq_num[k]]
+
+        if gap:
+            return self.w * dU
+        else:
+            return self.w * dU[1:]
+
+class LatentVoyagerPotential:
+
+    def __init__(self, refseq, w, ali=None, pca_precalculated=[], n_components=2):
+
+        self.w = w
+        self.L = len(refseq)
+
+        if isinstance(refseq[0], (str, np.str_)):
+            self.refseq = refseq
+            self.refseq_num = to_numeric(refseq)
+        else:
+            self.refseq_num = refseq
+            self.refseq = default_aa_alphabet[refseq]
+
+        if len(pca_precalculated) < 4:
+            if type(ali) != type(None):
+                self.pca_model, self.pca_embedding, self.encoder, self._enc_ali = \
+                        SequencePCA(ali, n=n_components)
+            else:
+                raise TypeError("Must pass either an alignment or a pretrained PCA model")
+
+        else:
+            self.pca_model, self.pca_embedding, self.encoder, self._enc_ali = pca_precalculated
+
+        self._means = np.mean(self._enc_ali, axis=0)
+        self._ref_one_hot = self.encoder.transform([self.refseq])[0]
+        self._ref_embedding = self.pca_model.transform([self._ref_one_hot])[0]
+
+        # Calculate the (constant) change in PCA difference for every mutational step
+        dz = [[] for i in range(self.L)]
 
         for k in range(self.L):
 
-            # change in dca component
-            h = -calc_dca_conditionals(s-1, self.model.h_i, self.model.J_ij, k)
+            for seq in position_mutants(self.refseq, k).as_numeric():
+                dz[k].append(partial_pca(self.pca_model, self._means, one_hot_encode(seq), [k]))
 
-            # change in distance to reference sequence
-            h = h + 1 - self.w1 * np.identity(21)[self.refseq[k]][1:]
+        self._dz_matrix = np.array(dz)
 
-            # change in pca potential
-            # first get the component terms for the position of interest, ignoring the gap term
-            components = self.pca_model.components_.reshape((self.n_components, self.L, 21))[:,k,1:].T
 
-            # calculate how far each one is from the identity of the reference
-            component_diffs = np.sqrt(np.sum((components - components[self.refseq[k]-1])**2, axis=1))
+    def transform_sequence(self, seq):
 
-            # add this term weighted by w2 into the overall weight
-            h = h - self.w2 * component_diffs
+        if len(seq) == len(self._ref_one_hot):
+            return self.pca_model.transform([seq])[0]
 
-            # All that matters is the difference between energies, magnitudes will be normalized out
-            #  subtract off the lowest to make numbers reasonable and prevent overflow
-            h -= np.min(h)
+        elif len(seq) == self.L:
 
-            conditional_probs = np.exp(-h / self.T)
+            if isinstance(seq[0], (str, np.str_)):
+                seq = to_numeric(seq)
 
-            #print(conditional_probs)
+            seq_enc = one_hot_encode(seq)
+            return self.pca_model.transform([seq_enc])[0]
 
-            p = conditional_probs[s[k]-1] / np.sum(conditional_probs)
+#     def dz(self, seq):
 
-            lik += np.log(p)
+#         # One hot encode the sequence for PCA transformation
+#         one_hot_seq = one_hot_encode(seq)
 
-        return lik
+#         # We will ignore all columns where the sequence is identical to the reference
+#         nonoverlap = np.where(seq != self.refseq_num)[0]
 
-    def RLVP(self, sequence):
+#         partial_input = partial_pca(self.pca_model, self._means, one_hot_seq, nonoverlap)
 
-        if sequence.shape == (self.L,):
-            if isinstance(sequence[0], (int, np.int64)):
-                sequence = self.encoder.transform([self.alphabet[sequence]])
-            else:
-                sequence = self.encoder.transform([sequence])
+#         partial_reference_z = partial_pca(self.pca_model, self._means, self._ref_one_hot, nonoverlap)
 
-        return RLVP(sequence, self.pca_model, self.refseq, self._ref_embedding, self.w1, self.w2)
+#         return partial_input - partial_reference_z
 
-    def calc_pseudolikelihoods(self):
 
-        L = []
+    def transform_sequences(self, sequences):
 
-        for seq in tqdm(np.concatenate(self.log)):
-            L.append(self.pseudolikelihood(seq))
+        return np.array([self.transform_sequence(seq) for seq in sequences])
 
-        return L
+    def energy(self, seq):
+
+        diff = self.transform_sequence(seq) - self._ref_embedding
+        return -self.w * np.sqrt(np.sum(diff**2))
+
+    def dU(self, seq, k, gap=False):
+
+        """
+        Returns an array of the energies for this bias potential for mutating
+        the site to all 20 amino acids at a position k. Called during Gibbs sampling.
+        """
+
+        # One hot encode the sequence for PCA transformation
+        one_hot_seq = one_hot_encode(seq)
+
+        # We will ignore all columns where the sequence is identical to the reference
+        nonoverlap = np.where(seq != self.refseq_num)[0]
+
+        # The components of the latent space embedding corresponding to the different positions for the input sequence
+        #  (for comparison with the reference, this *can* change things alas)
+        z_offset = partial_pca(self.pca_model, self._means, one_hot_seq, nonoverlap)
+
+        # The components of the latent space embedding for the different positions, now for all 20 mutations
+        #  the change for the twenty mutants is independent of input sequence and was precalculated as self._dz
+        partial_difference_z = z_offset + self._dz_matrix[k]
+
+        # That same partial for the reference sequence
+        #  terms corresponding to the positions different between the input sequence and the reference AND
+        #  position k that we are mutating
+        partial_reference_z = partial_pca(self.pca_model, self._means, self._ref_one_hot, np.concatenate([nonoverlap, [k]]))
+
+        # this is the change
+        delta_z = np.sqrt(np.sum((partial_difference_z - partial_reference_z)**2, axis=1))
+
+        return -self.w * delta_z
+
 
 @jit(nopython=True)
 def calc_dca_conditionals(seq, hi, jij, k):
@@ -696,3 +776,55 @@ def calc_dca_conditionals(seq, hi, jij, k):
         U.append(u)
 
     return np.array(U)
+
+def position_mutants(seq, k):
+
+    seqs = []
+
+    for i in range(1,21):
+        z = seq.copy()
+        z[k] = default_aa_alphabet[i]
+        seqs.append(z)
+
+    return msa.MultipleSequenceAlignment(np.array(seqs), ids=default_aa_alphabet[1:])
+
+def get_pos_index(model, index):
+    return np.where(model.index_list==index)[0][0]
+
+def partial_pca(pca_model, ali_enc_mean, seq_enc, selection):
+
+    '''
+    Embeds a point in PCA space using only a subset of features. Used for comparing differences
+    when the majority of features are unchanged for computational efficiency.
+    '''
+
+    if len(selection) > 0:
+        component_slice = pca_model.components_.reshape((2, model.L, 21))[:,selection]
+        sequence_slice = seq_enc.reshape((model.L, 21))[selection]
+        mean_slice = ali_enc_mean.reshape((model.L, 21))[selection]
+
+        return np.sum(component_slice * (sequence_slice - mean_slice), axis=(1,2))
+
+    else:
+        return 0
+
+def one_hot_encode(seq_num, dim=1):
+
+    '''
+    One-hot encode a numerically-encoded amino acid sequence. Faster than training a one-hot encoder
+    and using .transform()
+    '''
+
+    L = len(seq_num)
+
+    # Initialize an array of all zeros of the correct shape
+    x = np.zeros((L,21))
+
+    # Assign the appropriate positions to be ones
+    x[np.arange(L), seq_num] = 1
+
+    # Make one-dimensional if dim=1
+    if dim==1:
+        return x.reshape((L*21))
+    elif dim==2:
+        return x
