@@ -35,10 +35,12 @@ def partial_pca(pca_model, ali_enc_mean, seq_enc, selection):
     when the majority of features are unchanged for computational efficiency.
     '''
 
+    L = int(len(seq_enc)/21)
+
     if len(selection) > 0:
-        component_slice = pca_model.components_.reshape((2, model.L, 21))[:,selection]
-        sequence_slice = seq_enc.reshape((model.L, 21))[selection]
-        mean_slice = ali_enc_mean.reshape((model.L, 21))[selection]
+        component_slice = pca_model.components_.reshape((2, L, 21))[:,selection]
+        sequence_slice = seq_enc.reshape((L, 21))[selection]
+        mean_slice = ali_enc_mean.reshape((L, 21))[selection]
 
         return np.sum(component_slice * (sequence_slice - mean_slice), axis=(1,2))
 
