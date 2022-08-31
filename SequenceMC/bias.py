@@ -1,5 +1,5 @@
 import numpy as np
-from .utils import SequencePCA, partial_pca
+from .utils import SequencePCA, partial_pca, to_numeric
 
 class LinearDistanceRestraint:
 

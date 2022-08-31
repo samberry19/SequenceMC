@@ -372,3 +372,5 @@ def LatentVoyager(model, n_samples, n_chains, w1, w2, filename, method='gibbs', 
     sampler.generate_alignments(burnin=burnin)
 
     sampler.save(filename)
+
+    return sampler
