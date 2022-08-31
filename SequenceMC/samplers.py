@@ -354,7 +354,7 @@ def LatentVoyager(model, n_samples, n_chains, w1, w2, filename, method='gibbs', 
     if len(pca_precalculated) == 0:
         if type(ali) != type(None):
             pca_res = SequencePCA(ali, sparse=sparse_pca, alpha=alpha)
-        except:
+        else:
             raise TypeError("Must pass either precalculated PCA results or a multiple sequence alignment!")
 
     if type(refseq) == type(None):
