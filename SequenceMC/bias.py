@@ -55,7 +55,7 @@ class LatentVoyagerPotential:
             self.refseq_num = refseq
             self.refseq = default_aa_alphabet[refseq]
 
-        if len(pca_precalculated) < 4:
+        if len(pca_precalculated) < 3:
             if type(ali) != type(None):
                 self.pca_model, self.pca_embedding, self.encoder, self._enc_ali = \
                         SequencePCA(ali, n=n_components)
