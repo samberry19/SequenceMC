@@ -17,7 +17,7 @@ from sklearn.decomposition import PCA
 from joblib import Parallel, delayed
 import os
 
-from .utils import one_hot_encode, mutate, SequencePCA, to_numeric, one_hot_decode
+from .utils import one_hot_encode, mutate, SequencePCA, to_numeric, one_hot_decode, default_aa_alphabet
 from .bias import LinearDistanceRestraint, LatentVoyagerPotential
 from .dca import DCAEnergy, potts_model_hamiltonian, calc_dca_conditionals
 
