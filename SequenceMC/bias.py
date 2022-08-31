@@ -1,5 +1,5 @@
 import numpy as np
-from .utils import SequencePCA, partial_pca, to_numeric
+from .utils import SequencePCA, partial_pca, to_numeric, one_hot_encode
 
 class LinearDistanceRestraint:
 
@@ -57,16 +57,16 @@ class LatentVoyagerPotential:
 
         if len(pca_precalculated) < 3:
             if type(ali) != type(None):
-                self.pca_model, self.pca_embedding, self.encoder, self._enc_ali = \
+                self.pca_model, self.pca_embedding, self._enc_ali = \
                         SequencePCA(ali, n=n_components)
             else:
                 raise TypeError("Must pass either an alignment or a pretrained PCA model")
 
         else:
-            self.pca_model, self.pca_embedding, self.encoder, self._enc_ali = pca_precalculated
+            self.pca_model, self.pca_embedding, self._enc_ali = pca_precalculated
 
         self._means = np.mean(self._enc_ali, axis=0)
-        self._ref_one_hot = self.encoder.transform([self.refseq])[0]
+        self._ref_one_hot = one_hot_encode(self.refseq_num)
         self._ref_embedding = self.pca_model.transform([self._ref_one_hot])[0]
 
         # Calculate the (constant) change in PCA difference for every mutational step
