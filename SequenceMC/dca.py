@@ -1,3 +1,4 @@
+import numpy as np
 from numba import jit
 from .utils import one_hot_decode
 
