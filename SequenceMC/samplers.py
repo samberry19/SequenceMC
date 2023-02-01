@@ -28,7 +28,7 @@ class DCASampler:
 
     def __init__(self, model, N_chains, T=1, record_freq=1000, independent=False,
                  extra_potential=None, pos_constraint=None, one_hot=False, alphabet=default_aa_alphabet,
-                 initialization='reference'):
+                 initialization='reference', starting_seq=None):
 
         ''' Initialize the DCA sampler.
 
@@ -61,7 +61,11 @@ class DCASampler:
                             defaults to alphabetical with gaps as 0.
 
                 initialization: method of initialization. either 'reference', in which all chains start with the
-                            reference sequence, or 'random', in which all chains start with a random sequence.
+                            reference sequence; 'random', in which all chains start with a random sequence; or
+                            "defined," where you tell it what sequence to start with
+
+                starting_seq: for defined initialization, the sequence to start with. If you pass any argument other
+                            than the default of None for this, we will assume that you want defined initialization
 
         '''
 
@@ -82,6 +86,10 @@ class DCASampler:
         # without extra definitions, we can only do metropolis sampling
         self.default_method = 'metropolis'
         self.gibbs_implemented = False
+
+        # If you pass a starting sequence, assume that you want a defined initialization
+        if type(starting_seq) != type(None):
+            initialization = "defined"
 
         # define the reference sequence; more complicated if one-hot
         if one_hot:
@@ -117,8 +125,22 @@ class DCASampler:
                 self.log.append([initial_seq])
                 self.energies.append([self.hamiltonian(initial_seq)])
 
+            elif initialization == "defined":
 
-    def metropolis(self, N, nch, suppress_log=False):
+                if type(starting_seq) == type(None):
+                    raise InputError("Must pass an argument for starting_seq for defined initialization!")
+
+                else:
+                    if isinstance(starting_seq[0], (str, np.str_)):
+                        initial_seq = to_numeric(starting_seq, self.alphabet)
+
+                    else:
+                        initial_seq = starting_seq
+
+                    self.log.append([initial_seq])
+                    self.energies.append([self.hamiltonian(initial_seq)])
+
+    def metropolis(self, N, nch, suppress_log=False, progress=True):
 
         ''' Run Metropolis sampling of sequences from the DCA model, plus any added potentials.
 
@@ -133,9 +155,32 @@ class DCASampler:
         current_energy = self.hamiltonian(s)
 
         # tqdm here creates a progress bar, which I think is nice
-        with tqdm(total=N, position=0, leave=False) as pbar:
+        if progress:
+            with tqdm(total=N, position=0, leave=False) as pbar:
 
-            for n in tqdm(range(N), position=0, leave=False):
+                for n in tqdm(range(N), position=0, leave=False):
+
+                    # Propose a new sequence by ping one amino acid
+                    s_prop = mutate(s, one_hot = self.one_hot, pos_constraint = self.pos_constraint)
+
+                    # Calculate the energy of that new sequence
+                    prop_energy = self.hamiltonian(s_prop)
+
+                    # Acceptance probability is e^{del E}
+                    acceptance_prob = np.exp((prop_energy - current_energy)/self.T)
+
+                    # Accept based on this probability
+                    if np.random.uniform(0,1) < acceptance_prob:
+                        s = s_prop
+                        current_energy = prop_energy
+
+                    # Every self.record_freq times, record the sequence
+                    if (self.N_iterations + n) % self.record_freq == 0 and not suppress_log:
+                        self.log[nch].append(s)
+                        self.energies[nch].append(current_energy)
+
+        else:
+            for n in range(N):
 
                 # Propose a new sequence by ping one amino acid
                 s_prop = mutate(s, one_hot = self.one_hot, pos_constraint = self.pos_constraint)
@@ -181,8 +226,9 @@ class DCASampler:
 
             if parallel_method.lower() == 'none':
                 for i in range(self.N_chains):
-                    print("Sampling chain", i)
-                    self.metropolis(N, i)
+                    if progress:
+                        print("Sampling chain", i)
+                    self.metropolis(N, i, progress=progress)
 
             else:
 
