@@ -21,14 +21,15 @@ from .utils import one_hot_encode, mutate, SequencePCA, to_numeric, one_hot_deco
 from .bias import LinearDistanceRestraint, LatentVoyagerPotential
 from .dca import DCAEnergy, potts_model_hamiltonian, calc_dca_conditionals
 
-class DCASampler:
 
-    '''A class to sample from a DCA model using MCMC, allowing for the additional of extra potentials.
-            Relatively flexible for a variety of applications.'''
+class BaseSampler:
 
-    def __init__(self, model, N_chains, T=1, record_freq=1000, independent=False,
+    '''A base class to sample sequences from energy-based models given a hamiltonian function. Comes with Metropolis sampling
+        built-in, subclasses can custom define Gibbs sampling functions for particular kinds of hamiltonians.'''
+
+    def __init__(self, hamiltonian, L, N_chains, T=1, record_freq=1000, independent=False,
                  extra_potential=None, pos_constraint=None, one_hot=False, alphabet=default_aa_alphabet,
-                 initialization='reference', starting_seq=None):
+                 initialization='random', starting_seq=None):
 
         ''' Initialize the DCA sampler.
 
@@ -76,8 +77,7 @@ class DCASampler:
         self.N_iterations = 0
         self.record_freq = record_freq
         self.one_hot = one_hot
-        self.model = model
-        self.L = len(self.model.seq())
+        self.L = L
         self.alphabet = default_aa_alphabet
         self.shape = (self.L, len(self.alphabet))
         self.pos_constraint = pos_constraint
@@ -91,36 +91,13 @@ class DCASampler:
         if type(starting_seq) != type(None):
             initialization = "defined"
 
-        # define the reference sequence; more complicated if one-hot
-        if one_hot:
-            # fit the one hot encoder based on all single mutants for consistency
-            self.single_mutants = all_single_mutants(self.model.seq(), self.model)
-            self.encoder = OneHotEncoder(sparse=False)
-            self.encoder.fit(self.single_mutants.matrix)
-
-            # then encode the actual reference sequence
-            self.refseq = self.encoder.transform(self.model.seq().reshape(1, -1))[0]
-
-        else:
-            # otherwise just convert the sequence to numbers
-            self.refseq = to_numeric(self.model.seq(), self.alphabet)
-
         # define the hamiltonian
-        if type(extra_potential)==type(None):
-            self.hamiltonian = lambda x: DCAEnergy(x, model, one_hot=one_hot, independent=independent)
-
-        else:
-            self.hamiltonian = lambda x: DCAEnergy(x, model, one_hot=one_hot, independent=independent) + \
-                                            extra_potential(x)
+        self.hamiltonian = hamiltonian
 
         # initialize all chains and start them off with the reference sequence
         for chain in range(self.N_chains):
 
-            if initialization == 'reference':
-                self.log.append([self.refseq])
-                self.energies.append([self.hamiltonian(self.refseq)])
-
-            elif initialization == 'random':
+            if initialization == 'random':
                 initial_seq = np.random.choice(np.arange(1,21), self.L)
                 self.log.append([initial_seq])
                 self.energies.append([self.hamiltonian(initial_seq)])
@@ -160,7 +137,7 @@ class DCASampler:
 
                 for n in tqdm(range(N), position=0, leave=False):
 
-                    # Propose a new sequence by ping one amino acid
+                    # Propose a new sequence by changing one amino acid
                     s_prop = mutate(s, one_hot = self.one_hot, pos_constraint = self.pos_constraint)
 
                     # Calculate the energy of that new sequence
@@ -178,7 +155,7 @@ class DCASampler:
                     if (self.N_iterations + n) % self.record_freq == 0 and not suppress_log:
                         self.log[nch].append(s)
                         self.energies[nch].append(current_energy)
-
+                        
         else:
             for n in range(N):
 
@@ -337,6 +314,30 @@ class DCASampler:
         TempSamplerDict["N_chains"] = self.N_chains
 
         pickle.dump(TempSamplerDict, open(filename, "wb"))
+
+
+class DCASampler(BaseSampler):
+    
+    def __init__(self, model, N_chains, T=1, record_freq=1000, independent=False,
+                 extra_potential=None, pos_constraint=None, one_hot=False, alphabet=default_aa_alphabet,
+                 initialization='reference', starting_seq=None):
+        
+        self.model = model
+        self.L = model.L
+        
+        if type(extra_potential)==type(None):
+            self.hamiltonian = lambda x: DCAEnergy(x, model, one_hot=one_hot, independent=independent)
+
+        else:
+            self.hamiltonian = lambda x: DCAEnergy(x, model, one_hot=one_hot, independent=independent) + \
+                                            extra_potential(x)
+            
+        if initialization=="reference":
+            starting_seq = model.seq()
+        
+        super().__init__(self.hamiltonian, model.L, N_chains, T=T, record_freq=record_freq, independent=independent,
+                 pos_constraint=pos_constraint, one_hot=one_hot, alphabet=alphabet,
+                 initialization=initialization, starting_seq=starting_seq)
 
 
 class GibbsDCASampler(DCASampler):
