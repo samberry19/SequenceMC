@@ -105,7 +105,7 @@ def to_numeric(seq, aa_alphabet=default_aa_alphabet):
 
     ''' Converts a sequence from strings to numbers '''
 
-    return np.array([list(default_aa_alphabet).index(k) for k in seq])
+    return np.array([list(aa_alphabet).index(k) for k in seq])
 
 def all_single_mutants(s, m=None):
 
@@ -129,7 +129,17 @@ def mutate(s, alphabet_size=21, nmax=20, one_hot=False, pos_constraint=None):
 
     """Randomly mutate the sequence of interest.
         Sequence must be numerically coded, either 1-20 (one_hot=False)
-        or one-hot encoded in binary (one_hot=True)."""
+        or one-hot encoded in binary (one_hot=True).
+        
+        Optional arguments:
+        
+            one_hot: if TRUE, mutate a one-hot encoded sequence rather than a numerical one
+        
+            pos_constraint: this argument allows you to define which positions can and can't be mutated.
+                It can either be a 1D array of length len(s), in which case it will simply define which
+                positions can be mutated to any of the 20 amino acids, or it can a 2D array of size len(s)x20,
+                in which case it defines which total set of mutations can be made.
+        """
 
     N = len(s)
 
@@ -140,8 +150,18 @@ def mutate(s, alphabet_size=21, nmax=20, one_hot=False, pos_constraint=None):
     # Pick a position to mutate, with or without a constraint on which positions are available
     if type(pos_constraint) == type(None):
         pos = np.random.randint(N)
-    else:
+        pos_constraint = np.empty(0)
+    
+    # If you've passed a constraint only on the positions
+    elif pos_constraint.shape==len(s):
         pos = np.random.choice(pos_constraint)
+        
+    # If you've passed a constraint on the positions and the amino acids
+    elif pos_constraint.shape==(len(s), 20):
+        pos = np.random.choice(np.arange(len(s))[np.any(pos_constraint, axis=1)])
+    else:
+        print("Could not interpret pos_constraint of shape", pos_constraint.shape)
+        pos = np.random.randint(N)
 
     # Copy so we don't modify the original
     s_new = s.copy()
@@ -158,9 +178,17 @@ def mutate(s, alphabet_size=21, nmax=20, one_hot=False, pos_constraint=None):
 
     # Otherwise swapping out the position is very simple
     else:
-        s_new[pos] = np.random.choice(np.arange(1, 21))
+        
+        if pos_constraint.shape==(len(s), 20):
+
+            s_new[pos] = np.random.choice(np.where(pos_constraint[pos])[0])+1
+            #print(np.where(pos_constraint[pos])[0], s_new_pos-1)
+        
+        else:
+            s_new[pos] = np.random.choice(np.arange(1, 21))
 
     return s_new.astype('int')
+    
 
 def SequencePCA(alignment, n=2, sparse=False, alpha=1, ridge_alpha=0.01):
 
