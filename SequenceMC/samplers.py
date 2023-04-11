@@ -22,6 +22,10 @@ from .bias import LinearDistanceRestraint, LatentVoyagerPotential
 from .dca import DCAEnergy, potts_model_hamiltonian, calc_dca_conditionals
 
 
+from SequenceMC import default_aa_alphabet
+import os
+
+
 class BaseSampler:
 
     '''A base class to sample sequences from energy-based models given a hamiltonian function. Comes with Metropolis sampling
@@ -85,7 +89,7 @@ class BaseSampler:
 
         # without extra definitions, we can only do metropolis sampling
         self.default_method = 'metropolis'
-        self.gibbs_implemented = False
+        self.gibbs_implemented = True
 
         # If you pass a starting sequence, assume that you want a defined initialization
         if type(starting_seq) != type(None):
@@ -117,7 +121,7 @@ class BaseSampler:
                     self.log.append([initial_seq])
                     self.energies.append([self.hamiltonian(initial_seq)])
 
-    def metropolis(self, N, nch, suppress_log=False, progress=True):
+    def metropolis(self, N, nch, progress=True):
 
         ''' Run Metropolis sampling of sequences from the DCA model, plus any added potentials.
 
@@ -174,6 +178,35 @@ class BaseSampler:
                     current_energy = prop_energy
 
                 # Every self.record_freq times, record the sequence
+                if (self.N_iterations + n) % self.record_freq == 0 and not suppress_log:
+                    self.log[nch].append(s)
+                    self.energies[nch].append(current_energy)
+                    
+    def gibbs(self, N, nch, suppress_log=False):
+        
+        '''Standard Gibbs sampling based just on the Hamiltonian. If you have a faster way to calculate it,
+            redefine this function in a new class!'''
+        
+        s = self.log[nch][-1]
+        current_energy = self.hamiltonian(s)
+
+        with tqdm(total=N, position=0, leave=False) as pbar:
+
+            for n in tqdm(range(N), position=0, leave=False):
+
+                s = s.copy()
+
+                random_mutation_order = get_random_mutation_order(len(s), pos_constraint)
+
+                for k in random_mutation_order:
+
+                    # change in dca component
+                    muts = gen_all_muts(smc.to_numeric(kras_seq), 13)
+                    conditional_probs = np.array([np.exp(self.hamiltonian(m)/self.T) for m in muts])
+                    conditional_probs = conditional_probs/np.sum(conditional_probs)
+
+                    s[k] = np.random.choice(np.arange(1,21), p=conditional_probs)
+
                 if (self.N_iterations + n) % self.record_freq == 0 and not suppress_log:
                     self.log[nch].append(s)
                     self.energies[nch].append(current_energy)
