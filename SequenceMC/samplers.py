@@ -182,30 +182,48 @@ class BaseSampler:
                     self.log[nch].append(s)
                     self.energies[nch].append(current_energy)
                     
-    def gibbs(self, N, nch, suppress_log=False):
+    def gibbs(self, N, nch=0, suppress_log=False):
         
         '''Standard Gibbs sampling based just on the Hamiltonian. If you have a faster way to calculate it,
-            redefine this function in a new class!'''
+            redefine this function in a new class!
+            
+            Arguments:
+                N: the number of iterations to run. Note that one iteration loops through every position.
+                nch: the number of chain being run. Defaults to zero (the first chain) if not specified'''
         
         s = self.log[nch][-1]
         current_energy = self.hamiltonian(s)
 
+        # looping through iterations with a progress bar
         with tqdm(total=N, position=0, leave=False) as pbar:
 
             for n in tqdm(range(N), position=0, leave=False):
 
                 s = s.copy()
 
+                # Define a random order of mutations to sample (considering possible mutation constraints)
                 random_mutation_order = get_random_mutation_order(len(s), pos_constraint)
-
+                
+                # Loop through each position
                 for k in random_mutation_order:
 
-                    # change in dca component
-                    muts = gen_all_muts(smc.to_numeric(kras_seq), 13)
+                    # Generate all possible single mutants at that position
+                    muts = gen_all_muts(s, k, pos_constraint=pos_constraint[k])
+                    
+                    # Calculate the conditional probabilities
                     conditional_probs = np.array([np.exp(self.hamiltonian(m)/self.T) for m in muts])
+                    
+                    # And normalize them
                     conditional_probs = conditional_probs/np.sum(conditional_probs)
 
-                    s[k] = np.random.choice(np.arange(1,21), p=conditional_probs)
+                    if type(pos_constraint)==type(None):
+                        
+                        # Without a position constrant, just choose from 20 amino acids
+                        s[k] = np.random.choice(np.arange(1,21), p=conditional_probs)
+                        
+                    else:
+                        # Or choose from the allowed amino acids at that position
+                        s[k] = np.random.choice(np.arange(1,21)[pos_constraint[k]], p=conditional_probs)
 
                 if (self.N_iterations + n) % self.record_freq == 0 and not suppress_log:
                     self.log[nch].append(s)
