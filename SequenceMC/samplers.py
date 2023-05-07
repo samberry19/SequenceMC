@@ -17,7 +17,7 @@ from sklearn.decomposition import PCA
 from joblib import Parallel, delayed
 import os
 
-from .utils import one_hot_encode, mutate, SequencePCA, to_numeric, one_hot_decode, default_aa_alphabet
+from .utils import one_hot_encode, mutate, SequencePCA, to_numeric, one_hot_decode, default_aa_alphabet, gen_all_muts, get_random_mutation_order
 from .bias import LinearDistanceRestraint, LatentVoyagerPotential
 from .dca import DCAEnergy, potts_model_hamiltonian, calc_dca_conditionals
 
@@ -39,7 +39,9 @@ class BaseSampler:
 
             Parameters
             ----------
-            model :    a CouplingsModel object (the DCA model to score with)
+            hamiltonian : the hamiltonian (energy) function for the sequence of interest. make sure that *likelier* sequences have *lower* energies!
+                needs to be passed as a function, e.g. define an outside function or use lambda
+            L: the length of the sequence of interest
             N_chains : the number of MCMC chains to run
 
             optional:
@@ -121,7 +123,7 @@ class BaseSampler:
                     self.log.append([initial_seq])
                     self.energies.append([self.hamiltonian(initial_seq)])
 
-    def metropolis(self, N, nch, progress=True):
+    def metropolis(self, N, nch, progress=True, suppress_log=False):
 
         ''' Run Metropolis sampling of sequences from the DCA model, plus any added potentials.
 
@@ -147,8 +149,9 @@ class BaseSampler:
                     # Calculate the energy of that new sequence
                     prop_energy = self.hamiltonian(s_prop)
 
-                    # Acceptance probability is e^{del E}
-                    acceptance_prob = np.exp((prop_energy - current_energy)/self.T)
+                    # Acceptance probability is e^{-del E}
+                    #  current - prop = -(prop - current)
+                    acceptance_prob = np.exp((current_energy - prop_energy)/self.T)
 
                     # Accept based on this probability
                     if np.random.uniform(0,1) < acceptance_prob:
@@ -170,7 +173,7 @@ class BaseSampler:
                 prop_energy = self.hamiltonian(s_prop)
 
                 # Acceptance probability is e^{del E}
-                acceptance_prob = np.exp((prop_energy - current_energy)/self.T)
+                acceptance_prob = np.exp((current_energy - prop_energy)/self.T)
 
                 # Accept based on this probability
                 if np.random.uniform(0,1) < acceptance_prob:
@@ -202,32 +205,38 @@ class BaseSampler:
                 s = s.copy()
 
                 # Define a random order of mutations to sample (considering possible mutation constraints)
-                random_mutation_order = get_random_mutation_order(len(s), pos_constraint)
+                random_mutation_order = get_random_mutation_order(len(s), self.pos_constraint)
                 
                 # Loop through each position
                 for k in random_mutation_order:
 
                     # Generate all possible single mutants at that position
-                    muts = gen_all_muts(s, k, pos_constraint=pos_constraint[k])
+                    muts = gen_all_muts(s, k, pos_constraint=self.pos_constraint[k])
                     
+                    H = np.array([np.exp(-self.hamiltonian(m)/self.T) for m in muts])
+
+                    if len(self.bias) > 0:
+                        for bias in self.bias:
+                            H += bias.dU
+
                     # Calculate the conditional probabilities
-                    conditional_probs = np.array([np.exp(self.hamiltonian(m)/self.T) for m in muts])
+                    conditional_probs = np.exp(H)
                     
                     # And normalize them
                     conditional_probs = conditional_probs/np.sum(conditional_probs)
 
-                    if type(pos_constraint)==type(None):
+                    if type(self.pos_constraint)==type(None):
                         
                         # Without a position constrant, just choose from 20 amino acids
                         s[k] = np.random.choice(np.arange(1,21), p=conditional_probs)
                         
                     else:
                         # Or choose from the allowed amino acids at that position
-                        s[k] = np.random.choice(np.arange(1,21)[pos_constraint[k]], p=conditional_probs)
+                        s[k] = np.random.choice(np.arange(1,21)[self.pos_constraint[k]], p=conditional_probs)
 
                 if (self.N_iterations + n) % self.record_freq == 0 and not suppress_log:
                     self.log[nch].append(s)
-                    self.energies[nch].append(current_energy)
+                    #self.energies[nch].append(current_energy)
 
     def run(self, N, method=None, n_jobs = os.cpu_count(), parallel_method="threads", progress=True, suppress_log=False):
 

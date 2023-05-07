@@ -1,13 +1,18 @@
 import numpy as np
-from .utils import SequencePCA, partial_pca, to_numeric, one_hot_encode, position_mutants
+from .utils import SequencePCA, partial_pca, to_numeric, one_hot_encode, position_mutants, default_aa_alphabet
 
 class LinearDistanceRestraint:
 
     """
-    A linear distance restraint for sampling sequences. Adds a constant potential term
+    A linear distance restraint for sampling sequences. Adds a constant potential term.
     """
 
     def __init__(self, refseq, w):
+
+        '''
+        Initialize with a reference sequence and a weight, w. The weight can be any float and the reference sequence should be a numpy array,
+        either of string characters or numerically-encoded characters.
+        '''
 
         self.w = w
         self.L = len(refseq)
@@ -22,6 +27,10 @@ class LinearDistanceRestraint:
 
     def dist(self, seq):
 
+        '''
+        The Hamming distance of a sequence to the reference.
+        '''
+
         if isinstance(seq[0], (str, np.str_)):
             return np.sum(seq != self.refseq)
 
@@ -30,9 +39,24 @@ class LinearDistanceRestraint:
 
     def energy(self, seq):
 
+        '''
+        The energy associated with that sequence according to the bias potential (just the weight times the distance)
+        '''
+
         return self.w * self.dist(seq)
 
+
     def dU(self, seq, k, gap=False):
+
+        '''
+        The change in energy associated with all single amino acid changes to a particular sequence. Much faster than actually calculating the
+        "dist" function, used for Gibbs sampling.
+
+        Parameters:
+            seq: the seq you're mutating (*not* the reference sequence, that's fixed for the potential from initialization)
+            k: the position you're mutating
+            gap: whether or not to include a gap character. defaults to FALSE, returns an array of length 20, if TRUE then returns an array of length 21
+        '''
 
         dU = 1 - np.identity(21)[self.refseq_num[k]]
 

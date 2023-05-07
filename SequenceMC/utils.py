@@ -259,3 +259,62 @@ def selector(df, dic):
             X = X.loc[X[key]==val]
 
     return X
+
+
+def gen_all_muts(seq, n, pos_constraint=None):
+    
+    '''Generate all single mutations at a position'''
+    
+    seqs = []
+
+    if isinstance(seq[0], (str, np.str_)):
+    
+        if type(pos_constraint)==type(None):
+            for aa in smc.default_aa_alphabet[1:]:
+                s = seq.copy()
+                s[n] = aa
+                seqs.append(s)
+        else:
+            for aa in smc.default_aa_alphabet[pos_constraint]:
+                s = seq.copy()
+                s[n] = aa+1
+                seqs.append(s) 
+            
+    else:
+        
+        if type(pos_constraint)==type(None):
+            for aa_num in range(1, 21):
+                s = seq.copy()
+                s[n] = aa_num
+                seqs.append(s) 
+                
+        else:
+        
+            for aa_num in np.arange(1, 21)[pos_constraint]:
+                s = seq.copy()
+                s[n] = aa_num
+                seqs.append(s)
+        
+    return np.array(seqs)
+
+
+def get_random_mutation_order(N, pos_constraint=None):     
+
+    if type(pos_constraint) == type(None):
+        pos = np.random.choice(np.arange(N), N, replace=False)
+        pos_constraint = np.empty(0)
+
+    # If you've passed a constraint only on the positions
+    elif pos_constraint.shape==(N,):
+        pos = np.random.choice(np.where(pos_constraint)[0], np.sum(pos_constraint), replace=False)
+
+    # If you've passed a constraint on the positions and the amino acids
+    elif pos_constraint.shape==(N, 20):
+        allowed_pos = np.any(pos_constraint, axis=1)
+        pos = np.random.choice(np.arange(N)[allowed_pos], np.sum(allowed_pos), replace=False)
+
+    else:
+        print("Could not interpret pos_constraint of shape", pos_constraint.shape)
+        pos = np.random.choice(np.arange(N), N, replace=False)
+        
+    return pos
