@@ -233,7 +233,7 @@ class BaseSampler:
 
                     if len(self.bias) > 0:
                         for bias in self.bias:
-                            H += bias.dU(s, k)
+                            H += bias.dU(s, k)[self.pos_constraint[k]]
 
                     # Calculate the conditional probabilities
                     conditional_probs = np.exp(H)
