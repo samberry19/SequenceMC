@@ -229,14 +229,14 @@ class BaseSampler:
                     # Generate all possible single mutants at that position
                     muts = gen_all_muts(s, k, pos_constraint=self.pos_constraint[k])
                     
-                    H = np.array([np.exp(-self.hamiltonian(m)/self.T) for m in muts])
+                    U = np.array([self.hamiltonian(m, ignore_bias=True) for m in muts])
 
                     if len(self.bias) > 0:
                         for bias in self.bias:
-                            H += bias.dU(s, k)[self.pos_constraint[k]]
+                            U += bias.dU(s, k)[self.pos_constraint[k]]
 
                     # Calculate the conditional probabilities
-                    conditional_probs = np.exp(H)
+                    conditional_probs = np.exp(-U/self.T)
                     
                     # And normalize them
                     conditional_probs = conditional_probs/np.sum(conditional_probs)
