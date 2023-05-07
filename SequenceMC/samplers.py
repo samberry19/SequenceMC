@@ -98,7 +98,7 @@ class BaseSampler:
             initialization = "defined"
 
         # define the hamiltonian
-        self.hamiltonian = hamiltonian
+        self._ham = hamiltonian
 
         # initialize all chains and start them off with the reference sequence
         for chain in range(self.N_chains):
@@ -122,6 +122,22 @@ class BaseSampler:
 
                     self.log.append([initial_seq])
                     self.energies.append([self.hamiltonian(initial_seq)])
+
+
+    def hamiltonian(self, sequence, ignore_bias=False):
+
+        if len(self.bias) == 0 or ignore_bias:
+            return self._ham(sequence)
+
+        else:
+            
+            U = self._ham(sequence)
+
+            for bias in self.bias:
+                U += bias.energy(sequence)
+
+            return U
+
 
     def metropolis(self, N, nch, progress=True, suppress_log=False):
 
@@ -217,7 +233,7 @@ class BaseSampler:
 
                     if len(self.bias) > 0:
                         for bias in self.bias:
-                            H += bias.dU
+                            H += bias.dU(s, k)
 
                     # Calculate the conditional probabilities
                     conditional_probs = np.exp(H)
