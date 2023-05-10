@@ -5,7 +5,7 @@ from bioviper import msa, phylo
 from .samplers import BaseSampler
 from .utils import default_aa_alphabet
 
-def Evolver(f, tree, N, starting_seq, T=1, pos_constraint=None):
+def Evolver(f, tree, N, starting_seq, initialize=0, T=1, pos_constraint=None):
     
     '''
     Evolve sequences along a phylogeny by sampling from a DCA model.
@@ -17,10 +17,13 @@ def Evolver(f, tree, N, starting_seq, T=1, pos_constraint=None):
     S = []
     
     L = len(starting_seq)
+    
+    sampler = BaseSampler(f, L, 1, T=T, record_freq=1, initialization="defined", starting_seq=starting_seq, pos_constraint=pos_constraint)
+    sampler.run(initialize, parallel_method="None", progress=False)
 
     for clade in tree._biopython.clade:
         N_iterations = int(N*clade.branch_length)
-        sampler = BaseSampler(f, L, 1, T=T, record_freq=1, initialization="defined", starting_seq=starting_seq, pos_constraint=pos_constraint)
+        sampler = BaseSampler(f, L, 1, T=T, record_freq=1, initialization="defined", starting_seq=sampler.log[0][-1], pos_constraint=pos_constraint)
         sampler.run(N_iterations, parallel_method="None", progress=False)
 
         for subclade in clade.clades:
