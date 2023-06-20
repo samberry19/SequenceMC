@@ -1,6 +1,6 @@
 # SequenceMC
 
-Monte Carlo and Gibbs samplers for aligned biological sequences. Particular support for sampling from DCA models with additional added bias potentials, but can support any scoring function of sequences based on position.
+Metropolis and Gibbs samplers for aligned biological sequences. Particular support for sampling from DCA models with additional added bias potentials, but can support any scoring function of sequences based on position.
 
 I use my "bioviper" code for convenient manipulation of MSAs, [bioviper](https://github.com/samberry19/bioviper), which can be installed via:
 
