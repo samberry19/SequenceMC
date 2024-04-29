@@ -107,21 +107,22 @@ def to_numeric(seq, aa_alphabet=default_aa_alphabet):
 
     return np.array([list(aa_alphabet).index(k) for k in seq])
 
-def all_single_mutants(s, m=None):
+def all_single_mutants(s, alphabet=default_aa_alphabet, m=None, start_index=1):
 
     ''' Generate all single mutants of a sequence '''
 
     all_singles = [s]; names = ["WT"]
     for i in range(len(s)):
-        for j in default_aa_alphabet:
+        for j in alphabet:
             if s[i] != j:
                 sc = s.copy()
                 sc[i] = j
                 all_singles.append(sc)
-                if type(m)==type(None):
-                    names.append(s[i]+str(i)+j)
-                else:
+                if m:
                     names.append(s[i]+str(m.index_list[i])+j)
+                else:
+                    names.append(s[i]+str(i+start_index)+j)
+                    
 
     return msa.MultipleSequenceAlignment(np.array(all_singles), ids=names)
 
@@ -275,7 +276,7 @@ def gen_all_muts(seq, n, pos_constraint=None):
                 s[n] = aa
                 seqs.append(s)
         else:
-            for aa in smc.default_aa_alphabet[pos_constraint]:
+            for aa in default_aa_alphabet[pos_constraint]:
                 s = seq.copy()
                 s[n] = aa+1
                 seqs.append(s) 

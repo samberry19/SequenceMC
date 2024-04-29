@@ -28,31 +28,33 @@ import os
 
 class BaseSampler:
 
-    '''A base class to sample sequences from energy-based models given a hamiltonian function. Comes with Metropolis sampling
-        built-in, subclasses can custom define Gibbs sampling functions for particular kinds of hamiltonians.'''
+    '''A base class to sample sequences from energy-based models given a hamiltonian function. Comes with Metropolis and Gibbs sampling built-in,
+        assuming that you recalculate the hamiltonian each time. For particular functions you may be able to significant speed it up by re-implementing
+        gibbs/metropolis protocols, and you can define a new sampling method too if that's your thing.
 
-    def __init__(self, hamiltonian, L, N_chains, T=1, record_freq=1000, independent=False,
+        Additional supports added *bias* functions that are separate from the hamiltonian - for instance, a bias to sample sequences that are close to
+        a particular reference. This effectively just adds to the original hamiltonian function a new energy term.'''
+
+    def __init__(self, hamiltonian, L, N_chains, T=1, record_freq=1000,
                  extra_potential=None, pos_constraint=None, one_hot=False, alphabet=default_aa_alphabet,
                  initialization='random', starting_seq=None):
 
-        ''' Initialize the DCA sampler.
+        ''' Initialize the sampler.
 
             Parameters
             ----------
             hamiltonian : the hamiltonian (energy) function for the sequence of interest. make sure that *likelier* sequences have *lower* energies!
                 needs to be passed as a function, e.g. define an outside function or use lambda
+
             L: the length of the sequence of interest
             N_chains : the number of MCMC chains to run
 
             optional:
                 T : the computational temperature (defaults to 1)
-                    (remember: probabilities are e^{U/T})
+                    (remember: probabilities are proportional to e^{-U/T})
 
                 record_freq : "record" a sequence in the log every N steps.
                                 Defaults to 1000. Want fewer for Gibbs sampling.
-
-                independent : if TRUE, ignore couplings terms and use only fields h_i.
-                                Defaults to FALSE.
 
                 extra_potential : add an extra potential to the hamiltonian (defaults to NONE)
                                     Needs to be a function; I'd recommend using lambda notation, e.g.
@@ -67,8 +69,7 @@ class BaseSampler:
                 alphabet: what the amino acid alphabet is. defines which numbers map to which aas.
                             defaults to alphabetical with gaps as 0.
 
-                initialization: method of initialization. either 'reference', in which all chains start with the
-                            reference sequence; 'random', in which all chains start with a random sequence; or
+                initialization: method of initialization. either 'random', in which all chains start with a random sequence; or
                             "defined," where you tell it what sequence to start with
 
                 starting_seq: for defined initialization, the sequence to start with. If you pass any argument other
@@ -84,14 +85,13 @@ class BaseSampler:
         self.record_freq = record_freq
         self.one_hot = one_hot
         self.L = L
-        self.alphabet = default_aa_alphabet
+        self.alphabet = self.alphabet
         self.shape = (self.L, len(self.alphabet))
         self.pos_constraint = pos_constraint
         self.bias = []
 
-        # without extra definitions, we can only do metropolis sampling
+        # set default sampler to metropolis
         self.default_method = 'metropolis'
-        self.gibbs_implemented = True
 
         # If you pass a starting sequence, assume that you want a defined initialization
         if type(starting_seq) != type(None):
@@ -227,7 +227,14 @@ class BaseSampler:
                 for k in random_mutation_order:
 
                     # Generate all possible single mutants at that position
-                    muts = gen_all_muts(s, k, pos_constraint=self.pos_constraint[k])
+
+                    # if there's a defined position constraint do this
+                    try:
+                        muts = gen_all_muts(s, k, pos_constraint=self.pos_constraint[k])
+                    
+                    # otherwise generate without one
+                    else:
+                        muts = gen_all_muts(s, k, pos_constraint=None)
                     
                     U = np.array([self.hamiltonian(m, ignore_bias=True) for m in muts])
 
@@ -239,7 +246,7 @@ class BaseSampler:
                     conditional_probs = np.exp(-U/self.T)
                     
                     # And normalize them
-                    conditional_probs = conditional_probs/np.sum(conditional_probs)
+                    conditional_probs = conditional_probs/np.nansum(conditional_probs)
 
                     if type(self.pos_constraint)==type(None):
                         
@@ -254,7 +261,7 @@ class BaseSampler:
                     self.log[nch].append(s)
                     #self.energies[nch].append(current_energy)
 
-    def run(self, N, method=None, n_jobs = os.cpu_count(), parallel_method="threads", progress=True, suppress_log=False):
+    def run(self, N, method=None, n_jobs = os.cpu_count(), parallel_method="none", progress=True, suppress_log=False):
 
         ''' Run Markov Chain Monte Carlo on all chains.
 
@@ -401,13 +408,8 @@ class DCASampler(BaseSampler):
         self.model = model
         self.L = model.L
         
-        if type(extra_potential)==type(None):
-            self.hamiltonian = lambda x: DCAEnergy(x, model, one_hot=one_hot, independent=independent)
+        self._ham = lambda x: DCAEnergy(x, model, one_hot=one_hot, independent=independent)
 
-        else:
-            self.hamiltonian = lambda x: DCAEnergy(x, model, one_hot=one_hot, independent=independent) + \
-                                            extra_potential(x)
-            
         if initialization=="reference":
             starting_seq = model.seq()
         
@@ -444,8 +446,15 @@ class GibbsDCASampler(DCASampler):
 
                 if type(self.pos_constraint)==type(None):
                     random_mutation_order = np.random.choice(np.arange(self.L), self.L, replace=False)
+                    
+                elif isinstance(self.pos_constraint[0], (np.bool_, bool)):
+    
+                    pcon = np.where(self.pos_constraint)[0]
+                    random_mutation_order = np.random.choice(pcon, len(pcon), replace=False)
+                    
                 else:
-                    random_mutation_order = np.random.choice(self.pos_constraint, self.L, replace=False)
+                    
+                    random_mutation_order = np.random.choice(self.position_constraint, len(self.position_constraint), replace=False)
 
                 for k in random_mutation_order:
 
