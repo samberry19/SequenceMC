@@ -233,7 +233,7 @@ class BaseSampler:
                         muts = gen_all_muts(s, k, pos_constraint=self.pos_constraint[k])
                     
                     # otherwise generate without one
-                    else:
+                    except:
                         muts = gen_all_muts(s, k, pos_constraint=None)
                     
                     U = np.array([self.hamiltonian(m, ignore_bias=True) for m in muts])
