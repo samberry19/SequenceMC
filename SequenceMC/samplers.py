@@ -423,10 +423,10 @@ class GibbsDCASampler(DCASampler):
     '''A Gibbs sampler for the "Restrained latent voyager potential." Subclasses from the OneHotDCASampler
             but has a different run_mcmc.'''
 
-    def __init__(self, model, N_chains, T=1, record_freq=10, independent=False, pos_constraint=None):
+    def __init__(self, model, N_chains, T=1, record_freq=10, independent=False, pos_constraint=None, initialization="random"):
 
         super().__init__(model, N_chains, T=T, record_freq=record_freq, independent=independent,
-                         pos_constraint=pos_constraint, one_hot=False)
+                         pos_constraint=pos_constraint, one_hot=False, initialization=initialization)
 
         self.default_method = 'gibbs'
         self.gibbs_implemented=True
@@ -479,6 +479,7 @@ class GibbsDCASampler(DCASampler):
                 if (self.N_iterations + n) % self.record_freq == 0 and not suppress_log:
                     self.log[nch].append(s)
                     self.energies[nch].append(current_energy)
+                    
 
 def LatentVoyager(model, n_samples, n_chains, w1, w2, filename, method='gibbs', save=True, record_freq = 2, parallel_method='None',
                    pca_precalculated=(), ali=None, sparse_pca=False, alpha=1, refseq=None, burnin=10):
