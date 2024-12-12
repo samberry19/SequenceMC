@@ -401,8 +401,8 @@ class BaseSampler:
 
 class DCASampler(BaseSampler):
     
-    def __init__(self, model, N_chains, T=1, record_freq=1000, independent=False,
-                 extra_potential=None, pos_constraint=None, one_hot=False, alphabet=default_aa_alphabet,
+    def __init__(self, model, N_chains, T=1, record_freq=1000,
+                 extra_potential=None, pos_constraint=None, alphabet=default_aa_alphabet,
                  initialization='reference', starting_seq=None):
         
         self.model = model
