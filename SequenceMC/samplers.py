@@ -36,7 +36,7 @@ class BaseSampler:
         a particular reference. This effectively just adds to the original hamiltonian function a new energy term.'''
 
     def __init__(self, hamiltonian, L, N_chains, T=1, record_freq=1000,
-                 extra_potential=None, pos_constraint=None, one_hot=False, alphabet=default_aa_alphabet,
+                 extra_potential=None, pos_constraint=None, alphabet=default_aa_alphabet,
                  initialization='random', starting_seq=None):
 
         ''' Initialize the sampler.
@@ -83,9 +83,9 @@ class BaseSampler:
         self.log = []; self.energies = []
         self.N_iterations = 0
         self.record_freq = record_freq
-        self.one_hot = one_hot
+        #self.one_hot = one_hot
         self.L = L
-        self.alphabet = self.alphabet
+        self.alphabet = alphabet
         self.shape = (self.L, len(self.alphabet))
         self.pos_constraint = pos_constraint
         self.bias = []
@@ -160,7 +160,7 @@ class BaseSampler:
                 for n in tqdm(range(N), position=0, leave=False):
 
                     # Propose a new sequence by changing one amino acid
-                    s_prop = mutate(s, one_hot = self.one_hot, pos_constraint = self.pos_constraint)
+                    s_prop = mutate(s, one_hot = False, pos_constraint = self.pos_constraint)
 
                     # Calculate the energy of that new sequence
                     prop_energy = self.hamiltonian(s_prop)
@@ -183,7 +183,7 @@ class BaseSampler:
             for n in range(N):
 
                 # Propose a new sequence by ping one amino acid
-                s_prop = mutate(s, one_hot = self.one_hot, pos_constraint = self.pos_constraint)
+                s_prop = mutate(s, one_hot = False, pos_constraint = self.pos_constraint)
 
                 # Calculate the energy of that new sequence
                 prop_energy = self.hamiltonian(s_prop)
@@ -331,11 +331,11 @@ class BaseSampler:
 
             # Convert raw numeric sequence log to a MultipleSequenceAlignment object
 
-            log = np.array(log)
-            if self.one_hot:
-                log_numeric = np.argmax(log.reshape(log.shape[0], len(self.model.seq()), 21), axis=2)
-            else:
-                log_numeric = log
+            log_numeric = np.array(log)
+            #if self.one_hot:
+                #log_numeric = np.argmax(log.reshape(log.shape[0], len(self.model.seq()), 21), axis=2)
+            #else:
+            #log_numeric = log
 
             ali = msa.MultipleSequenceAlignment(np.array(self.alphabet[log_numeric])[indexer],
                                             ids=np.array([str(i) for i in np.arange(len(indexer))]))
@@ -408,13 +408,13 @@ class DCASampler(BaseSampler):
         self.model = model
         self.L = model.L
         
-        self._ham = lambda x: DCAEnergy(x, model, one_hot=one_hot, independent=independent)
+        self._ham = lambda x: DCAEnergy(x, model)
 
         if initialization=="reference":
             starting_seq = model.seq()
         
         super().__init__(self.hamiltonian, model.L, N_chains, T=T, record_freq=record_freq, independent=independent,
-                 pos_constraint=pos_constraint, one_hot=one_hot, alphabet=alphabet,
+                 pos_constraint=pos_constraint, alphabet=alphabet,
                  initialization=initialization, starting_seq=starting_seq)
 
 
@@ -423,10 +423,10 @@ class GibbsDCASampler(DCASampler):
     '''A Gibbs sampler for the "Restrained latent voyager potential." Subclasses from the OneHotDCASampler
             but has a different run_mcmc.'''
 
-    def __init__(self, model, N_chains, T=1, record_freq=10, independent=False, pos_constraint=None, initialization="random"):
+    def __init__(self, model, N_chains, T=1, record_freq=10, pos_constraint=None, initialization="random"):
 
-        super().__init__(model, N_chains, T=T, record_freq=record_freq, independent=independent,
-                         pos_constraint=pos_constraint, one_hot=False, initialization=initialization)
+        super().__init__(model, N_chains, T=T, record_freq=record_freq,
+                         pos_constraint=pos_constraint, initialization=initialization)
 
         self.default_method = 'gibbs'
         self.gibbs_implemented=True
