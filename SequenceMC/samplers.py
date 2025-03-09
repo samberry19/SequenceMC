@@ -413,7 +413,7 @@ class DCASampler(BaseSampler):
         if initialization=="reference":
             starting_seq = model.seq()
         
-        super().__init__(self._ham, model.L, N_chains, T=T, record_freq=record_freq, independent=independent,
+        super().__init__(self._ham, model.L, N_chains, T=T, record_freq=record_freq,
                  pos_constraint=pos_constraint, alphabet=alphabet,
                  initialization=initialization, starting_seq=starting_seq)
 
